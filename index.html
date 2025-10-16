@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TRANSTORNO_TRAUMATICOS_ESTRESSORES</title>
+<style>
+  :root{--bg:#0f172a;--card:#111827;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--pri:#4f46e5;--ok:#22c55e;--err:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto}
+  .wrap{max-width:1000px;margin:24px auto;padding:0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  h1{margin:0 0 6px;font-size:1.35rem}
+  .muted{color:var(--muted)}
+  .grid-info{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 6px}
+  @media(max-width:720px){.grid-info{grid-template-columns:1fr}}
+  .info{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:10px}
+  .info b{display:block;margin-bottom:4px;color:#cbd5e1}
+
+  .q{border:1px solid var(--line);border-radius:12px;padding:12px;background:#0b1220;margin-bottom:10px}
+  .q h3{margin:0 0 8px;font-size:1rem}
+  textarea{width:100%;min-height:80px;resize:vertical;border-radius:10px;border:1px solid var(--line);background:#0a0f1c;color:var(--text);padding:10px}
+  .hint{font-size:.9rem;color:#9fb2cc;margin-bottom:8px}
+  .opts{display:flex;flex-wrap:wrap;gap:10px}
+  label.opt{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+  .opt input[type="radio"]{accent-color:var(--pri)}
+  label.opt:has(input[type="radio"]:checked){ background:var(--pri); border-color:var(--pri); color:#fff; }
+  label.opt:has(input[type="radio"]:checked) span{ color:#fff; font-weight:600; }
+
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--pri);border:none;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}
+  .btn.ok{background:var(--ok)}
+  .btn:disabled{opacity:.6;cursor:not-allowed}
+  .msg{margin:10px 0;padding:10px;border-radius:8px}
+  .okbox{background:#052e1a;border:1px solid #114d2a;color:#b3f7c1}
+  .errbox{background:#3b0d0d;border:1px solid #5b1919;color:#ffd0d0}
+  .warnbox{background:#3a2903;border:1px solid #5c4307;color:#ffe6b0}
+  .legend{background:#0b1220;border:1px dashed var(--line);border-radius:10px;padding:10px;margin:6px 0 12px}
+  /* já existe para radio; adicione também para checkbox */
+  label.opt:has(input[type="checkbox"]:checked){
+  background:var(--pri); border-color:var(--pri); color:#fff;
+}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>TRANSTORNO_TRAUMATICOS_ESTRESSORES</h1>
+    
+    <!-- Dados do paciente (por token) -->
+    <div id="pacInfo" class="grid-info" style="display:none;"></div>
+
+    <form id="form" style="margin-top:14px; display:none;">
+      <div id="qs"></div>
+
+      <div class="legend muted">Dica: escreva livremente; o rascunho é salvo automaticamente neste dispositivo.</div>
+
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <button id="btnSubmit" class="btn ok" type="submit">Enviar anamnese</button>
+        <div id="progress" class="muted"></div>
+      </div>
+      <div id="msg" class="msg" style="display:none"></div>
+    </form>
+
+    <div id="alert" class="msg" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+// ======== CONFIG ========
+const SHEETDB_BASE = "https://sheetdb.io/api/v1/8pmdh33s9fvy8";
+const SHEETS = { PATIENTS:"Patients", TOKENS:"LinkTokens", SCORES:"Scores_TRANSTORNO_TRAUMATICOS_ESTRESSORES" };
+const CODE = "TRANSTORNO_TRAUMATICOS_ESTRESSORES";
+const PORTAL_URL = "https://integradaneuropsicologia.github.io/formularios/";
+
+// ======== HELPERS ========
+const $ = s => document.querySelector(s);
+const onlyDigits = s => (s||"").replace(/\D+/g,"");
+const qs = k => new URLSearchParams(location.search).get(k) || "";
+const AUTOSAVE_KEY = `${CODE}_${qs("token")||"no_token"}`;
+
+function setBox(id, text, kind="ok"){ const el=$(id); if(!el) return;
+  el.textContent=text; el.className="msg "+(kind==="ok"?"okbox":kind==="warn"?"warnbox":"errbox"); el.style.display="block";
+}
+function hideBox(id){ const el=$(id); if(el){ el.style.display="none"; el.textContent=""; } }
+function maskCPF(cpf){ const d=onlyDigits(cpf||""); if(d.length!==11) return cpf||""; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`; }
+function fmtDateISO(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return (y&&m&&d)?`${d}/${m}/${y}`:iso; }
+async function GET(url){ const r=await fetch(url); if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }
+async function POST(url, body){ const r=await fetch(url,{method:"POST",headers:{ "Content-Type":"application/json" },body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function PATCH(url, body){ const r=await fetch(url,{method:"PATCH",headers:{ "Content-Type":"application/json" },body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function sheetSearch(sheet, params){ const usp=new URLSearchParams(params); return GET(`${SHEETDB_BASE}/search?sheet=${encodeURIComponent(sheet)}&${usp.toString()}`); }
+async function sheetCreate(sheet, row){ return POST(`${SHEETDB_BASE}?sheet=${encodeURIComponent(sheet)}`, { data:[row] }); }
+async function sheetPatchBy(sheet, column, value, data){ return PATCH(`${SHEETDB_BASE}/${encodeURIComponent(column)}/${encodeURIComponent(value)}?sheet=${encodeURIComponent(sheet)}`, { data }); }
+function goPortalWithToken(){ const TOKEN=qs("token"); try{ const u=new URL(PORTAL_URL,location.href); u.searchParams.set("token",TOKEN); location.href=u.toString(); }catch(_){ const sep=PORTAL_URL.includes("?")?"&":"?"; location.href=PORTAL_URL+sep+"token="+encodeURIComponent(TOKEN); }}
+
+// ======== PERGUNTAS ========
+// Escalas padrão
+const FREQ5   = ["Nunca","Raramente","Às vezes","Frequentemente","Quase sempre"];
+const SEVER4  = ["Não","Leve","Moderada","Grave"];
+const YESNO   = ["Sim","Não"];
+const YNP     = ["Sim","Não","Não sei"];
+
+// Perguntas
+const QUESTIONS = [
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Exposição direta a evento traumático (ameaça real de morte/lesão/violência sexual)", options: YNP },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Testemunhou trauma grave afetando outra pessoa", options: YNP },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Tomou conhecimento de trauma violento com familiar/próximo", options: YNP },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Exposição repetida a detalhes aversivos (profissionais de saúde, segurança, mídia forense)", options: YNP },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Número de eventos traumáticos ao longo da vida", options:["Nenhum","1","2–3","4+"] },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Tipo principal de evento", options:["Nenhum","Violência urbana/assalto","Violência doméstica","Abuso sexual","Acidente grave","Desastre (natural/humano)","Doença/procedimento médico","Morte súbita de próximo","Testemunhou morte","Outros"] },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Tempo desde o evento mais marcante", options:["< 1 mês","1–6 meses","6–12 meses","> 1 ano"] },
+  { type:"checkbox", section:"Trauma — Triagem & História", text:"Prejuízo em ≥ 2 contextos (casa/trabalho/social)", options: YNP },
+
+  // ——— REEXPERIÊNCIA (INTRUSÕES) ———
+  { type:"checkbox", section:"TEPT — Reexperiência", text:"Lembranças intrusivas, invasivas, difíceis de controlar", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Reexperiência", text:"Pesadelos recorrentes relacionados ao trauma", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Reexperiência", text:"Flashbacks/sensação de reviver o evento", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Reexperiência", text:"Mal-estar intenso diante de pistas/lembranças do trauma", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Reexperiência", text:"Reações fisiológicas (taquicardia, sudorese) a pistas do trauma", options: FREQ5 },
+
+  // ——— EVITAÇÃO ———
+  { type:"checkbox", section:"TEPT — Evitação", text:"Evita lembranças/pensamentos/sentenças internas sobre o trauma", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Evitação", text:"Evita pessoas/lugares/objetos/atividades que lembram o trauma", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Evitação", text:"Usa 'comportamentos de segurança' (rotas de fuga, companhia, checagens)", options: FREQ5 },
+
+  // ——— ALTERAÇÕES NEGATIVAS DE COGNIÇÃO & HUMOR ———
+  { type:"checkbox", section:"TEPT — Cognição & Humor", text:"Lacunas de memória sobre aspectos do trauma (amnésia dissociativa)", options: YNP },
+  { type:"checkbox", section:"TEPT — Cognição & Humor", text:"Crenças negativas persistentes sobre si/mundo (\"sou fraco\", \"o mundo é perigoso\")", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Cognição & Humor", text:"Autoculpa/culpa do sobrevivente (\"poderia ter evitado\")", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Cognição & Humor", text:"Afeto negativo persistente (medo, horror, raiva, vergonha)", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Cognição & Humor", text:"Perda de interesse/prazer; distanciamento de outros", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Cognição & Humor", text:"Incapacidade de sentir emoções positivas (entorpecimento)", options: FREQ5 },
+
+  // ——— HIPERATIVAÇÃO/REAÇÃO ———
+  { type:"checkbox", section:"TEPT — Hiperativação", text:"Irritabilidade/explosões de raiva", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Hiperativação", text:"Comportamentos de risco/imprudência", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Hiperativação", text:"Hipervigilância/escaneia ambiente o tempo todo", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Hiperativação", text:"Resposta de sobressalto exagerada", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Hiperativação", text:"Problemas de concentração", options: FREQ5 },
+  { type:"checkbox", section:"TEPT — Hiperativação", text:"Alterações de sono (insônia/pesadelos)", options: FREQ5 },
+
+  // ——— DISSOCIATIVO ———
+  { type:"checkbox", section:"TEPT — Dissociativo", text:"Despersonalização (sensação de estar fora do corpo)", options: YNP },
+  { type:"checkbox", section:"TEPT — Dissociativo", text:"Desrealização (mundo 'irreal' ou distante)", options: YNP },
+
+  // ——— CURSO & ESPECIFICADORES ———
+  { type:"checkbox", section:"TEPT — Curso & Duração", text:"Sintomas iniciaram após 1 mês do evento (expressão retardada)", options: YNP },
+  { type:"checkbox", section:"TEPT — Curso & Duração", text:"Duração global dos sintomas mais intensos", options:["< 1 mês","1–6 meses","6–12 meses","> 12 meses"] },
+
+  // ——— TRANSTORNO DE ESTRESSE AGUDO (até 30 dias) ———
+  { type:"checkbox", section:"Estresse Agudo", text:"Sintomas ocorreram nos primeiros 30 dias pós-trauma", options: YNP },
+  { type:"checkbox", section:"Estresse Agudo", text:"Entorpecimento emocional/'desligamento' nas primeiras semanas", options: FREQ5 },
+  { type:"checkbox", section:"Estresse Agudo", text:"Hipervigilância/irritabilidade marcantes nas primeiras semanas", options: FREQ5 },
+
+  // ——— TRANSTORNO DE AJUSTAMENTO ———
+  { type:"checkbox", section:"Ajustamento", text:"Estressor identificável (mudança, conflito, perda, doença) no último trimestre", options: YNP },
+  { type:"checkbox", section:"Ajustamento", text:"Início dos sintomas até 3 meses após o estressor", options: YNP },
+  { type:"checkbox", section:"Ajustamento", text:"Sofrimento/impacto desproporcionais à intensidade do estressor", options: SEVER4 },
+  { type:"checkbox", section:"Ajustamento", text:"Sintomas remitem até 6 meses após cessar o estressor", options: YNP },
+  { type:"checkbox", section:"Ajustamento", text:"Padrão predominante", options:["Nenhum","Com humor deprimido","Com ansiedade","Misto (ansioso/deprimido)","Com perturbação da conduta"] },
+
+  // ——— LUTO PROLONGADO (DSM-5-TR) ———
+  { type:"checkbox", section:"Luto Prolongado", text:"Perda de pessoa próxima há ≥ 12 meses (adulto)", options: YNP },
+  { type:"checkbox", section:"Luto Prolongado", text:"Saudade nostalgia intensa/desejo persistente pela pessoa", options: FREQ5 },
+  { type:"checkbox", section:"Luto Prolongado", text:"Preocupação absorvente com a falecida(o)", options: FREQ5 },
+  { type:"checkbox", section:"Luto Prolongado", text:"Dor emocional intensa (tristeza, culpa, raiva) recorrente", options: FREQ5 },
+  { type:"checkbox", section:"Luto Prolongado", text:"Evitação de lembranças/locais/objetos do falecido", options: FREQ5 },
+  { type:"checkbox", section:"Luto Prolongado", text:"Entorpecimento, incredulidade ou sensação de vazio", options: FREQ5 },
+  { type:"checkbox", section:"Luto Prolongado", text:"Dificuldade em retomar objetivos/identidade sem a pessoa", options: FREQ5 },
+
+  // ——— GATILHOS & CONTEXTO ———
+  { type:"checkbox", section:"Trauma — Gatilhos & Contexto", text:"Gatilhos previsíveis (datas, cheiros, sons, rotas)", options: FREQ5 },
+  { type:"checkbox", section:"Trauma — Gatilhos & Contexto", text:"Ambientes superestimulantes pioram (multidão, sirenes, mídia)", options: FREQ5 },
+  { type:"checkbox", section:"Trauma — Gatilhos & Contexto", text:"Evita atendimento médico/exames por associação com trauma", options: FREQ5 },
+
+  // ——— FUNCIONAMENTO ———
+  { type:"checkbox", section:"Trauma — Funcionamento", text:"Queda de produtividade no trabalho/estudos", options: FREQ5 },
+  { type:"checkbox", section:"Trauma — Funcionamento", text:"Conflitos/isolamento em relações", options: FREQ5 },
+  { type:"checkbox", section:"Trauma — Funcionamento", text:"Compromisso com autocuidado (sono, higiene, finanças)", options: SEVER4 },
+
+  // ——— DIFERENCIAL & SUBSTÂNCIAS ———
+  { type:"checkbox", section:"Trauma — Diferencial", text:"Uso de álcool/substâncias para amortecer memórias/ansiedade", options: YNP },
+  { type:"checkbox", section:"Trauma — Diferencial", text:"Condição clínica (tireoide, dor crônica, TCE) explicando parte dos sintomas", options: YNP },
+  { type:"checkbox", section:"Trauma — Diferencial", text:"Psicose primária (delírios/alucinações não ligados ao evento)", options: YNP },
+
+  // ——— RISCO & PROTEÇÃO ———
+  { type:"checkbox", section:"Trauma — Risco & Proteção", text:"Ideação de morte/suicida desde o evento", options: YNP },
+  { type:"checkbox", section:"Trauma — Risco & Proteção", text:"Autoagressão/condutas de risco após o evento", options: YNP },
+  { type:"checkbox", section:"Trauma — Risco & Proteção", text:"Rede de apoio presente (família/amigos/trabalho)", options: YNP },
+  { type:"checkbox", section:"Trauma — Risco & Proteção", text:"Rotina de autocuidado/estratégias (relaxamento, exposição gradual, journaling)", options: FREQ5 }
+];
+
+
+const N = QUESTIONS.length;
+
+// ======== RENDER ========
+function renderQuestions(){
+  const host = $("#qs"); host.innerHTML="";
+
+  QUESTIONS.forEach((q, idx)=>{
+    const n = idx+1;
+    const qn = String(n).padStart(2,"0");
+    const wrap = document.createElement("div");
+    wrap.className = "q";
+
+    if (typeof q === "string") {
+      // textarea (como antes)
+      wrap.innerHTML = `
+        <h3 id="lbl${qn}">${n}. ${q}</h3>
+        <textarea name="q${qn}" id="q${qn}" placeholder="Escreva aqui..."></textarea>
+      `;
+    } else if (q.type === "checkbox") {
+      // grupo de checkboxes
+      const opts = q.options || [];
+      let html = `<h3 id="lbl${qn}">${n}. ${q.text}</h3><div class="opts">`;
+      opts.forEach((opt, i)=>{
+        const id = `q${qn}_${i}`;
+        html += `
+          <label class="opt">
+            <input type="checkbox" name="q${qn}" id="${id}" value="${opt}">
+            <span>${opt}</span>
+          </label>`;
+      });
+      html += `</div>`;
+      wrap.innerHTML = html;
+    }
+    host.appendChild(wrap);
+  });
+
+  // autosize + progresso
+  host.addEventListener("input", e=>{
+    if(e.target.tagName==="TEXTAREA"){
+      e.target.style.height="auto";
+      e.target.style.height=(e.target.scrollHeight+2)+"px";
+    }
+    updateProg(); autosaveAnswers();
+  });
+  host.addEventListener("change", ()=>{ updateProg(); autosaveAnswers(); });
+
+  updateProg();
+}
+
+function updateProg(){
+  let filled = 0;
+  QUESTIONS.forEach((q, idx)=>{
+    const qn = `q${String(idx+1).padStart(2,"0")}`;
+    if (typeof q === "string") {
+      const el = $("#"+qn);
+      if(el && el.value.trim()) filled++;
+    } else if (q.type === "checkbox") {
+      const any = document.querySelectorAll(`input[name="${qn}"]:checked`).length > 0;
+      if(any) filled++;
+    }
+  });
+  $("#progress").textContent = `${filled}/${N} respondidas`;
+}
+
+
+// ======== AUTOSAVE ========
+function autosaveAnswers(){
+  const answers = {}, qaPairs = [];
+let answeredCount = 0;
+
+QUESTIONS.forEach((q, idx)=>{
+  const n = idx+1;
+  const qn = `q${String(n).padStart(2,"0")}`;
+  const label = QUESTIONS[idx].text || QUESTIONS[idx]; // string ou objeto
+
+  if (typeof q === "string") {
+    const el = $("#"+qn);
+    const val = (el?.value||"").trim();
+    answers[qn] = val;
+    if(val) answeredCount++;
+    qaPairs.push(`${n}. ${label}: ${val ? val.replace(/\s+/g," ").trim() : "(sem resposta)"}`);
+  } else if (q.type === "checkbox") {
+    const vals = Array.from(document.querySelectorAll(`input[name="${qn}"]:checked`)).map(el=>el.value);
+    answers[qn] = vals; // array
+    if(vals.length) answeredCount++;
+    qaPairs.push(`${n}. ${label}: ${vals.length ? vals.join(", ") : "(nenhuma opção marcada)"}`);
+  }
+});
+
+const categoria = qaPairs.join(" | "); // <- vai completo pra sua coluna "categoria"
+
+  localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ code: CODE, token: qs("token"), answers }));
+}
+
+function restoreAutosave(){
+  try{
+    const raw = localStorage.getItem(AUTOSAVE_KEY); if(!raw) return;
+    const {answers} = JSON.parse(raw)||{}; if(!answers) return;
+
+    Object.entries(answers).forEach(([key,val])=>{
+      if(Array.isArray(val)){
+        // checkbox
+        val.forEach(v=>{
+          const el = document.querySelector(`input[name="${key}"][value="${v}"]`);
+          if(el) el.checked = true;
+        });
+      }else{
+        // textarea
+        const el = $("#"+key);
+        if(el){ el.value = val; el.style.height="auto"; el.style.height=(el.scrollHeight+2)+"px"; }
+      }
+    });
+    updateProg();
+  }catch(_){}
+}
+
+function clearAutosave(){ localStorage.removeItem(AUTOSAVE_KEY); }
+
+// ======== ESTADO ========
+let patient=null, tokenRow=null, CPF="";
+let startAt = Date.now();
+
+// ======== BOOT POR TOKEN ========
+(async function boot(){
+  try{
+    const TOKEN=qs("token");
+    if(!TOKEN){ setBox("#alert","Link inválido (sem token). Solicite um novo link.","err"); return; }
+
+    const trows=await sheetSearch(SHEETS.TOKENS,{ token:TOKEN });
+    if(!trows?.length) throw new Error("Token inválido ou expirado.");
+    tokenRow=trows[0];
+    const disabled=String(tokenRow.disabled||"não").toLowerCase()==="sim";
+    const expired = tokenRow.expires_at && (Date.parse(tokenRow.expires_at) < Date.now());
+    if(disabled || expired) throw new Error("Token desativado/expirado. Peça um novo link.");
+
+    CPF=onlyDigits(tokenRow.cpf||""); if(!CPF) throw new Error("Token sem CPF vinculado.");
+
+    const prows=await sheetSearch(SHEETS.PATIENTS,{ cpf:CPF });
+    if(!prows?.length) throw new Error("Paciente não encontrado.");
+    patient=prows[0];
+
+    const allowed=String(patient[CODE]||"").toLowerCase()==="sim";
+    if(!allowed){ setBox("#alert","Este formulário não está liberado para você. Entre em contato com o consultório.","err"); return; }
+
+    const flagDone=String(patient[`${CODE}_FEITO`]||"").toLowerCase()==="sim";
+    const already=await sheetSearch(SHEETS.SCORES,{ cpf:CPF, code:CODE });
+    if(flagDone || (already && already.length)){
+      setBox("#alert","Você já respondeu este formulário. Voltando ao portal…","ok");
+      setTimeout(goPortalWithToken,1200); return;
+    }
+
+    renderPatientInfo();
+    renderQuestions();
+    $("#pacInfo").style.display="grid";
+    $("#form").style.display="block";
+    hideBox("#alert");
+    startAt=Date.now();
+    restoreAutosave();
+
+  }catch(err){
+    console.error(err);
+    setBox("#alert", err.message || "Falha ao abrir o formulário. Tente novamente mais tarde.", "err");
+  }
+})();
+
+function renderPatientInfo(){
+  const g=$("#pacInfo"); g.innerHTML="";
+  const info=[["Nome",patient.nome||"-"],["CPF",maskCPF(patient.cpf)],["Nascimento",fmtDateISO(patient.data_nascimento)],["E-mail",patient.email||"-"],["WhatsApp",patient.whatsapp||"-"]];
+  for(const [k,v] of info){
+    const d=document.createElement("div"); d.className="info";
+    d.innerHTML=`<b>${k}</b><div>${v||"-"}</div>`;
+    g.appendChild(d);
+  }
+}
+
+// ======== SUBMIT ========
+let sending=false;
+$("#form").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  if(sending) return; sending=true; hideBox("#msg");
+  const btn=$("#btnSubmit"); const originalText=btn.textContent; btn.disabled=true; btn.textContent="Enviando…";
+
+  try{
+    if(!patient) throw new Error("Sessão inválida. Recarregue o link.");
+
+    const answers = {};           // { q01: "...", q02: ["A","B"], ... }
+    const qaPairs = [];           // "1. Pergunta: resposta"
+    let answeredCount = 0;
+
+    for (let i=1; i<=N; i++){
+      const q = QUESTIONS[i-1];
+      const qn = `q${String(i).padStart(2,"0")}`;
+      const label = (typeof q === "string") ? q : (q.text || `Pergunta ${i}`);
+
+      if (typeof q === "string"){
+        // textarea
+        const el = document.getElementById(qn);
+        const val = (el?.value || "").trim();
+        answers[qn] = val;
+        if (val) answeredCount++;
+        qaPairs.push(`${i}. ${label}: ${val ? val.replace(/\s+/g," ").trim() : "(sem resposta)"}`);
+      } else if (q.type === "checkbox"){
+        // grupo de checkboxes
+        const checked = Array.from(document.querySelectorAll(`input[name="${qn}"]:checked`)).map(el=>el.value);
+        answers[qn] = checked; // array
+        if (checked.length) answeredCount++;
+        qaPairs.push(`${i}. ${label}: ${checked.length ? checked.join(", ") : "(nenhuma opção marcada)"}`);
+      } else {
+        // fallback (não esperado aqui, mas seguro)
+        qaPairs.push(`${i}. ${label}: (tipo não suportado)`);
+      }
+    }
+
+    // Anti-duplicidade antes de gravar
+    const again = await sheetSearch(SHEETS.SCORES,{ cpf:CPF, code:CODE });
+    if (again && again.length){
+      setBox("#msg","Este formulário já foi enviado anteriormente. Voltando ao portal…","ok");
+      setTimeout(goPortalWithToken,1000);
+      return;
+    }
+
+    const categoria = qaPairs.join(" | "); // <- string única pra sua coluna "categoria"
+    const durationSec = Math.round((Date.now()-startAt)/1000);
+
+    const row = {
+      result_id: `${patient.cpf}_${CODE}_${Date.now()}`,
+      token: qs("token"),
+      cpf: patient.cpf,
+      code: CODE,
+      source: "paciente",
+      submitted_at: new Date().toISOString(),
+      total: answeredCount,                 // qtd de questões com resposta
+      categoria,                           // perguntas + respostas em texto corrido
+      metrics: JSON.stringify({
+        questions: QUESTIONS,              // estrutura completa
+        answers,                           // valores por qNN (string ou array)
+        answeredCount,
+        duration_sec: durationSec
+      })
+    };
+
+    await sheetCreate(SHEETS.SCORES, row);
+    await sheetPatchBy(SHEETS.PATIENTS, "cpf", patient.cpf, {
+      [`${CODE}_FEITO`]: "sim",
+      [`${CODE}_FEITO_AT`]: new Date().toISOString()
+    });
+
+    clearAutosave();
+    setBox("#msg","Anamnese enviada. Retornando ao portal…","ok");
+    setTimeout(goPortalWithToken, 1300);
+
+  } catch(err){
+    console.error(err);
+    setBox("#msg", err.message || "Falha ao enviar. Tente novamente.", "err");
+    sending=false; btn.disabled=false; btn.textContent=originalText;
+  }
+});
+
+</script>
+</body>
+</html>
